@@ -11,11 +11,13 @@ import json
 import os
 import time
 import logging
+import hmac, hashlib, base64
 from pathlib import Path
 from typing import Dict, Optional
+from datetime import datetime
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, BackgroundTasks
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
@@ -198,3 +200,64 @@ async def ping_avito(access: str = Depends(get_valid_access_token)):
         "response_sample": r.json() if r.status_code == 200 else r.text,
     }
 
+
+@app.post("/subscribe-avito-webhook")
+async def subscribe_webhook(
+    background: BackgroundTasks,
+    access: str = Depends(get_valid_access_token),  # функция уже есть :contentReference[oaicite:3]{index=3}
+):
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            f"{AVITO_API_BASE}/messenger/v3/webhook",
+            headers={"Authorization": f"Bearer {access}"},
+            json={"url": os.getenv("WEBHOOK_PUBLIC_URL")},
+        )
+    if r.status_code not in (200, 201):
+        raise HTTPException(r.status_code, r.text)
+
+    logger.info("Webhook subscribed: %s", r.json())
+    return {"detail": "Webhook subscription OK", "avito_response": r.json()}
+
+
+
+def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
+    """Avito шлёт X-Hook-Signature (договоритесь о секрете в кабинете)."""
+    dig = hmac.new(secret.encode(), payload, hashlib.sha256).digest()
+    return hmac.compare_digest(base64.b64encode(dig).decode(), signature)
+
+async def send_telegram(text: str):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.post(url, data={"chat_id": chat_id, "text": text})
+
+@app.post("/avito/webhook")
+async def avito_webhook(request: Request):
+    raw = await request.body()
+    sig = request.headers.get("X-Hook-Signature", "")
+    secret = os.getenv("AVITO_HOOK_SECRET", "changeme")
+
+    if not verify_signature(raw, sig, secret):
+        logger.warning("Invalid webhook signature")
+        raise HTTPException(401, "Bad signature")
+
+    payload = await request.json()    # {id, payload, timestamp, version}
+
+    # Достаём полезную информацию
+    msg_data = payload.get("payload", {}).get("message", {})
+    chat_id = msg_data.get("chat_id", "неизвестно")
+    text = msg_data.get("text", "[пусто]")
+    ts = payload.get("timestamp", int(time.time()))
+    timestamp_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Формируем красивое сообщение
+    tg_msg = (
+        "📩 Новое сообщение Avito\n\n"
+        f"Текст: {text}\n"
+        f"Чат:   #{chat_id}\n"
+        f"Время: {timestamp_str}"
+    )
+
+    await send_telegram(tg_msg)
+    return {"ok": True}
