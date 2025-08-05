@@ -4,3 +4,4 @@ httpx>=0.25.0
 python-dotenv>=1.0.0
 apscheduler
 pytho
+python-multipart>=0.0.5
