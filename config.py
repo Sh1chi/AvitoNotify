@@ -18,6 +18,7 @@ REDIRECT_URI     = os.getenv("AVITO_REDIRECT_URI")
 TOKEN_URL        = os.getenv("AVITO_TOKEN_URL",  "https://api.avito.ru/token")
 AVITO_API_BASE   = os.getenv("AVITO_API_BASE",  "https://api.avito.ru")
 AVITO_HOOK_SECRET = os.getenv("AVITO_HOOK_SECRET", "changeme")
+AVITO_USER_ID = int(os.getenv("AVITO_USER_ID", 0))
 
 # ── Telegram bot credentials ───────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")

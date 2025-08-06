@@ -16,7 +16,13 @@ app = FastAPI(title="Avito OAuth bridge")
 app.include_router(public.router)
 app.include_router(webhook.router)
 
+from reminders import REMINDERS
+from datetime import datetime, timezone, timedelta
 
+REMINDERS["chat-001"] = {
+    "first_ts": datetime.now(timezone.utc) - timedelta(minutes=15),
+    "last_reminder": None,
+}
 
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
