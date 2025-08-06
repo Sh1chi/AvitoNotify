@@ -1,8 +1,9 @@
 """
 Отправка периодических напоминаний, если продавец не ответил клиенту.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict
+from db import get_pool
 import logging, httpx
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -48,46 +49,56 @@ async def _last_message_status(chat_id: int) -> str:
 
 async def remind_loop() -> None:
     """
-    Проверяет, есть ли чаты без ответа дольше заданного интервала,
-    и отправляет напоминание в Telegram.
+    раз в минуту: берёт активные напоминания из БД,
+    проверяет последнее сообщение и/или шлёт уведомление
     """
     now = datetime.now(timezone.utc)
-    for chat_id, data in list(REMINDERS.items()):
-        # Первое напоминание: время с момента сообщения >= REMIND_AFTER_MIN
-        need_first = now - data["first_ts"] >= timedelta(minutes=config.REMIND_AFTER_MIN)
+    sql_due = """
+        SELECT account_id, chat_id, first_ts, last_reminder
+        FROM   reminders
+        WHERE  (last_reminder IS NULL OR $1 - last_reminder >= $2)
+        """
+    async with (await get_pool()).acquire() as conn:
+        rows = await conn.fetch(sql_due, now, timedelta(minutes=config.REMIND_AFTER_MIN))
 
-        # Повторное напоминание: если не было ещё ни одного
-        # или с последнего прошло >= REMIND_AFTER_MIN
-        need_next = (
-            data["last_reminder"] is None
-            or now - data["last_reminder"] >= timedelta(minutes=config.REMIND_AFTER_MIN)
-        )
-
-        if not (need_first and need_next):
-            continue
-
-        status = await _last_message_status(chat_id)
+    for row in rows:
+        status = await _last_message_status(row["chat_id"])
+        pool = await get_pool()
 
         if status == "buyer":
-            minutes = int((now - data["first_ts"]).total_seconds() // 60)
+            minutes = int((now - row["first_ts"]).total_seconds() // 60)
             await telegram.send_telegram(
-                f"⏰ Уже {minutes} мин без ответа в чате #{chat_id}"
+                f"⏰ Уже {minutes} мин без ответа в чате #{row['chat_id']}"
             )
-            data["last_reminder"] = now
-            log.info("Reminder sent for chat %s", chat_id)
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE reminders SET last_reminder = $1 WHERE account_id=$2 AND chat_id=$3",
+                    now,
+                    row["account_id"],
+                    row["chat_id"],
+                )
 
         elif status == "unknown":
             await telegram.send_telegram(
-                f"⚠️ Не удалось получить данные по чату #{chat_id}. "
-                "Пожалуйста, проверьте диалог вручную."
+                f"⚠️ Не удалось получить данные по чату #{row['chat_id']}. "
+                "Проверьте вручную."
             )
-            data["last_reminder"] = now
-            log.info("Fallback reminder (unknown status) sent for chat %s", chat_id)
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE reminders SET last_reminder = $1 WHERE account_id=$2 AND chat_id=$3",
+                    now,
+                    row["account_id"],
+                    row["chat_id"],
+                )
 
         elif status == "seller":
-            # продавец уже ответил — webhook не сработал, убираем чат
-            REMINDERS.pop(chat_id, None)
-            log.info("Chat %s answered by seller (via API), reminder removed", chat_id)
+            # продавец ответил – убираем запись
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM reminders WHERE account_id=$1 AND chat_id=$2",
+                    row["account_id"],
+                    row["chat_id"],
+                )
 
 
 def register(app: FastAPI) -> None:

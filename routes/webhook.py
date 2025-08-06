@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 
 import config, telegram
+from db import get_pool
 from reminders import REMINDERS
 
 router = APIRouter()
@@ -18,6 +19,21 @@ def _verify_signature(body: bytes, signature: str, secret: str) -> bool:
     """
     calc = hmac.new(secret.encode(), body, hashlib.sha256).digest()
     return hmac.compare_digest(base64.b64encode(calc).decode(), signature)
+
+
+async def _ensure_account(avito_user_id: int) -> int:
+    """
+    Возвращает internal `account_id`, создавая запись при первом веб-хуке.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO accounts (avito_user_id) VALUES ($1) "
+            "ON CONFLICT (avito_user_id) DO UPDATE SET avito_user_id = EXCLUDED.avito_user_id "
+            "RETURNING id",
+            avito_user_id,
+        )
+    return row["id"]
 
 
 @router.post("/avito/webhook")
@@ -44,25 +60,40 @@ async def avito_webhook(request: Request):
     text    = value.get("content", {}).get("text", "[пусто]")
 
     # Читаемый timestamp
-    ts = datetime.fromtimestamp(event["timestamp"], tz=timezone.utc)\
+    ts_str = datetime.fromtimestamp(event["timestamp"], tz=timezone.utc)\
                  .strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    # продавец ответил — убираем напоминание
+    account_id = await _ensure_account(seller)
+    pool = await get_pool()
+
+    # ───── продавец ответил → удаляем напоминание ──────────────────
     if author == seller:
-        REMINDERS.pop(chat_id, None)
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM reminders WHERE account_id=$1 AND chat_id=$2",
+                account_id,
+                chat_id,
+            )
         return {"ok": True}
 
-    # Клиент написал — шлём уведомление в Telegram
+    # ───── покупатель написал → уведомляем и ставим напоминание ────
     msg = (
         "📩 *Новое сообщение Avito*\n"
+        f"Аккаунт: {seller}\n"
         f"Чат #{chat_id}\n"
         f"Текст: {text}\n"
-        f"Время: {ts}"
+        f"Время: {ts_str}"
     )
     await telegram.send_telegram(msg)
 
-    # Ставим напоминание, если его ещё нет
-    REMINDERS.setdefault(
-        chat_id, {"first_ts": datetime.now(timezone.utc), "last_reminder": None}
-    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO reminders (account_id, chat_id, first_ts)
+            VALUES ($1, $2, now())
+            ON CONFLICT (account_id, chat_id) DO NOTHING
+            """,
+            account_id,
+            chat_id,
+        )
     return {"ok": True}

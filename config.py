@@ -30,6 +30,12 @@ REMIND_AFTER_MIN = int(os.getenv("REMIND_AFTER_MIN", 1))  # интервал (в
 # ── Файл для хранения access/refresh токенов Avito ────────────────────────
 TOKENS_FILE = Path("tokens.json")
 
+# ── Database ──────────────────────────────────────────────────────────────
+NOTIFY_DB_URL = os.getenv(
+    "NOTIFY_DB_URL",
+    "postgresql://postgres:postgres@localhost:5432/avito?options=-csearch_path%3Dnotify",
+)
+
 # ── Настройка логгера, общий формат и уровень ─────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
