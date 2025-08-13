@@ -5,3 +5,4 @@ python-dotenv>=1.0.0
 apscheduler
 pytho
 python-multipart>=0.0.5
+aiogram>=3.5,<4

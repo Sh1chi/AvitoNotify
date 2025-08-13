@@ -8,11 +8,15 @@ from fastapi import FastAPI, Request
 import reminders
 from routes import public, webhook
 from db import install_pool
+from admin_aiogram import install as install_aiogram
+from reminders import install as install_reminders
 
 log = logging.getLogger("avito_bridge.main")
 
 app = FastAPI(title="Avito OAuth bridge")
 install_pool(app)
+install_aiogram(app)
+install_reminders(app)
 
 # Подключаем маршруты
 app.include_router(public.router)
@@ -35,5 +39,4 @@ async def _startup():
     """
     Инициализация приложения при запуске (регистрация планировщика).
     """
-    reminders.register(app)
     log.info("Startup complete")

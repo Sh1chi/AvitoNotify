@@ -21,3 +21,17 @@ async def send_telegram(text: str) -> None:
         log.error("Telegram error %s: %s", r.status_code, r.text)
         raise RuntimeError(f"Telegram API {r.status_code}: {r.text}")
     log.info("→ Telegram OK: %s", text[:80])
+
+
+
+async def send_telegram_to(text: str, chat_id: int, bot_token: str | None = None) -> None:
+    token = bot_token or getattr(config, "TELEGRAM_BOT_TOKEN", None)
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.post(url, data={"chat_id": chat_id, "text": text})
+    if r.status_code != 200:
+        log.error("Telegram error %s: %s", r.status_code, r.text)
+        raise RuntimeError(f"Telegram API {r.status_code}: {r.text}")
+    log.info("→ Telegram OK to %s: %s", chat_id, text[:80])

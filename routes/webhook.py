@@ -7,10 +7,9 @@ from fastapi import APIRouter, HTTPException, Request
 
 import config, telegram
 from db import get_pool
-from reminders import REMINDERS
 
 router = APIRouter()
-log = logging.getLogger("avito_bridge.webhook")
+log = logging.getLogger("AvitoNotify.webhook")
 
 
 def _verify_signature(body: bytes, signature: str, secret: str) -> bool:
