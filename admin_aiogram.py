@@ -1,10 +1,12 @@
-# admin_aiogram.py — aiogram 3.x: админ-команды и онбординг
+"""
+Aiogram-бот для управления привязками аккаунтов Avito к Telegram-группам.
+Обрабатывает команды администратора и сохраняет данные в БД.
+"""
 from __future__ import annotations
 import asyncio, logging, re
 from datetime import time as dtime
 from typing import Optional
 
-import asyncpg
 from aiogram import Bot, Dispatcher, Router
 from aiogram.types import Message, ChatMemberUpdated
 from aiogram.filters import Command, CommandObject
@@ -14,12 +16,11 @@ from db import get_pool
 
 log = logging.getLogger("AvitoNotify.aiogram")
 
-# --- Глобалы модуля ---
 router = Router()
-_pool: asyncpg.Pool | None = None
 _bot_db_id: int | None = None
 
 
+# Текст справки для команды /help
 HELP_TEXT = (
     "👋 Админ-панель подключений.\n\n"
     "Команды:\n"
@@ -32,7 +33,10 @@ HELP_TEXT = (
 
 
 async def _ensure_bot_record(bot: Bot) -> None:
-    """Сохраняем/обновляем сведения о боте в notify.telegram_bots (tg_bot_id, username)."""
+    """
+    Сохраняет/обновляет запись бота в notify.telegram_bots.
+    Хранит db_id в глобальной переменной для последующих связок.
+    """
     global _bot_db_id
     me = await bot.get_me()
     tg_bot_id = int(me.id)
@@ -52,7 +56,10 @@ async def _ensure_bot_record(bot: Bot) -> None:
 
 
 async def _upsert_chat(chat) -> int:
-    """Сохраняем группу/чат в notify.telegram_chats, возвращаем его id."""
+    """
+    Сохраняет/обновляет информацию о чате в notify.telegram_chats.
+    Возвращает внутренний id чата.
+    """
     tg_chat_id = int(chat.id)
     ctype = chat.type  # "group"/"supergroup"/"private"/"channel"
     title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(tg_chat_id)
@@ -71,6 +78,10 @@ async def _upsert_chat(chat) -> int:
 
 
 async def _ensure_account(avito_user_id: int, name: Optional[str]) -> int:
+    """
+    Создаёт или обновляет запись аккаунта Avito в notify.accounts.
+    Возвращает внутренний id аккаунта.
+    """
     async with (await get_pool()).acquire() as conn:
         await conn.execute("""
             INSERT INTO notify.accounts (avito_user_id, name)
@@ -86,11 +97,13 @@ async def _ensure_account(avito_user_id: int, name: Optional[str]) -> int:
 
 
 async def _account_id_by_avito(avito_user_id: int) -> int | None:
+    """Возвращает внутренний id аккаунта по avito_user_id или None."""
     async with (await get_pool()).acquire() as conn:
         return await conn.fetchval("SELECT id FROM notify.accounts WHERE avito_user_id = $1", avito_user_id)
 
 
 async def _ensure_link(account_id: int, chat_db_id: int) -> None:
+    """Создаёт связь аккаунта с чатом, если её ещё нет."""
     async with (await get_pool()).acquire() as conn:
         await conn.execute("""
             INSERT INTO notify.account_chat_links (account_id, chat_id, bot_id, muted)
@@ -100,6 +113,10 @@ async def _ensure_link(account_id: int, chat_db_id: int) -> None:
 
 
 async def _update_links_for_chat(chat_db_id: int, **kwargs) -> None:
+    """
+    Обновляет настройки всех связей аккаунтов с данным чатом.
+    Например: mute, рабочие часы, время дайджеста.
+    """
     if not kwargs: return
     sets, vals = [], []
     for i, (k, v) in enumerate(kwargs.items(), start=1):
@@ -112,11 +129,13 @@ async def _update_links_for_chat(chat_db_id: int, **kwargs) -> None:
 
 
 def _is_admin(message: Message) -> bool:
+    """Проверяет, что отправитель — администратор, указанный в конфиге."""
     user_id = int(message.from_user.id) if message.from_user else 0
     return user_id == int(config.TELEGRAM_ADMIN_USER_ID or 0)
 
 
 def _parse_hours(s: str) -> tuple[dtime, dtime, Optional[str]]:
+    """Разбирает строку формата 'HH:MM-HH:MM [Europe/Moscow]' в рабочие часы и таймзону."""
     m = re.match(r"^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})(?:\s+([\w/\-]+))?$", s or "")
     if not m:
         raise ValueError("Формат: HH:MM-HH:MM [Europe/Moscow]")
@@ -129,6 +148,9 @@ def _parse_hours(s: str) -> tuple[dtime, dtime, Optional[str]]:
 
 @router.message(Command("start", "help"))
 async def cmd_help(message: Message):
+    """
+    Отправляет справочную информацию (HELP_TEXT) администратору в личном чате.
+    """
     if message.chat.type != "private":
         return
     if not _is_admin(message):
@@ -138,6 +160,10 @@ async def cmd_help(message: Message):
 
 @router.message(Command("add_avito"))
 async def cmd_add_avito(message: Message, command: CommandObject):
+    """
+    Регистрирует новый Avito-аккаунт в БД.
+    Формат: /add_avito <avito_user_id> [name]
+    """
     if message.chat.type != "private":
         return await message.answer("Эту команду нужно отправлять в личку боту.")
     if not _is_admin(message):
@@ -156,6 +182,10 @@ async def cmd_add_avito(message: Message, command: CommandObject):
 
 @router.message(Command("link"))
 async def cmd_link(message: Message, command: CommandObject):
+    """
+    Привязывает Telegram-группу к существующему Avito-аккаунту.
+    Формат: /link <avito_user_id>
+    """
     if message.chat.type not in ("group", "supergroup"):
         return await message.answer("Эту команду нужно отправлять в *группе*.")
     if not _is_admin(message):
@@ -177,6 +207,10 @@ async def cmd_link(message: Message, command: CommandObject):
 
 @router.message(Command("mute"))
 async def cmd_mute(message: Message, command: CommandObject):
+    """
+    Включает или отключает уведомления в текущей группе.
+    Формат: /mute on|off
+    """
     if message.chat.type not in ("group", "supergroup"):
         return
     if not _is_admin(message):
@@ -192,6 +226,10 @@ async def cmd_mute(message: Message, command: CommandObject):
 
 @router.message(Command("hours"))
 async def cmd_hours(message: Message, command: CommandObject):
+    """
+    Задаёт рабочие часы для уведомлений в группе.
+    Формат: /hours HH:MM-HH:MM [Europe/Moscow]
+    """
     if message.chat.type not in ("group", "supergroup"):
         return
     if not _is_admin(message):
@@ -210,6 +248,10 @@ async def cmd_hours(message: Message, command: CommandObject):
 
 @router.message(Command("digest"))
 async def cmd_digest(message: Message, command: CommandObject):
+    """
+    Настраивает ежедневный дайджест или отключает его.
+    Формат: /digest HH:MM|off
+    """
     if message.chat.type not in ("group", "supergroup"):
         return
     if not _is_admin(message):
@@ -232,6 +274,11 @@ async def cmd_digest(message: Message, command: CommandObject):
 # Бота добавили/разрешили в группе
 @router.my_chat_member()
 async def on_my_chat_member(update: ChatMemberUpdated, bot: Bot):
+    """
+    Реакция на добавление бота в группу:
+    - сохраняем чат в БД
+    - просим пользователя привязать Avito-аккаунт
+    """
     chat = update.chat
     status = update.new_chat_member.status
     if chat.type in ("group", "supergroup") and status in ("member", "administrator"):
@@ -241,6 +288,10 @@ async def on_my_chat_member(update: ChatMemberUpdated, bot: Bot):
 
 # --- Встраивание в FastAPI-приложение ---
 def install(app) -> None:
+    """
+    Встраивает aiogram-бота в FastAPI-приложение.
+    Запускает polling в фоне при старте приложения.
+    """
     """Запуск aiogram poller-а как фоновой задачи FastAPI."""
     dp = Dispatcher()
     dp.include_router(router)
@@ -258,5 +309,3 @@ def install(app) -> None:
         task = getattr(app.state, "aiogram_task", None)
         if task:
             task.cancel()
-        if _pool:
-            await _pool.close()  # type: ignore[func-returns-value]

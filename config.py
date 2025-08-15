@@ -43,3 +43,10 @@ logging.basicConfig(
     format="[%(asctime)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger("avito_bridge")
+
+
+AVITO_OWNER_USER_ID = int(os.getenv("AVITO_OWNER_USER_ID", "0") or "0")
+AVITO_OAUTH_SCOPES = os.getenv(
+    "AVITO_OAUTH_SCOPES",
+    "user:read,messenger:read,messenger:write"
+)

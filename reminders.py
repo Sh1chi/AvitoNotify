@@ -2,29 +2,30 @@
 Отправка периодических напоминаний, если продавец не ответил клиенту.
 """
 from datetime import datetime, timezone, timedelta
-from db import get_pool
 import logging, httpx
-
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from auth import get_valid_access_token
-_scheduler: AsyncIOScheduler | None = None  # ← добавь выше, рядом с логгером
 
 import telegram, config
+from auth import get_valid_access_token
+from db import get_pool
 
 log = logging.getLogger("AvitoNotify.reminders")
+_scheduler: AsyncIOScheduler | None = None  # планировщик хранится глобально
 
 
-async def _last_message_status(avito_chat_id: int) -> str:
+async def _last_message_status(avito_user_id: int, avito_chat_id: int | str) -> str:
     """
-    Возвращает 'buyer' | 'seller' | 'unknown', анализируя
-    GET /messenger/v2/accounts/{AVITO_USER_ID}/chats/{avito_chat_id}.
+    Возвращает 'buyer' | 'seller' | 'unknown', проверяя
+    направление последнего сообщения в чате Avito.
+
+    'buyer'  – последнее сообщение от клиента,
+    'seller' – последнее сообщение от продавца,
+    'unknown' – не удалось определить (ошибка сети или API).
     """
-    token = await get_valid_access_token()
-    url = (
-        f"{config.AVITO_API_BASE}"
-        f"/messenger/v2/accounts/{config.AVITO_USER_ID}/chats/{avito_chat_id}"
-    )
+    chat_id = str(avito_chat_id)
+    token = await get_valid_access_token(avito_user_id)
+    url = f"{config.AVITO_API_BASE}/messenger/v2/accounts/{avito_user_id}/chats/{chat_id}"
 
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -47,20 +48,23 @@ async def _last_message_status(avito_chat_id: int) -> str:
 
 async def remind_loop() -> None:
     """
-    раз в минуту: берёт активные напоминания из БД,
-    проверяет последнее сообщение и/или шлёт уведомление
+    Основной цикл напоминаний:
+    - получает из БД просроченные напоминания;
+    - проверяет, кто написал последнее сообщение;
+    - уведомляет или удаляет напоминание в зависимости от результата.
     """
     now = datetime.now(timezone.utc)
     sql_due = """
-        SELECT account_id, avito_chat_id, first_ts, last_reminder
-        FROM   reminders
-        WHERE  (last_reminder IS NULL OR $1 - last_reminder >= $2)
-        """
+        SELECT r.account_id, a.avito_user_id, r.avito_chat_id, r.first_ts, r.last_reminder
+        FROM   reminders r
+        JOIN   accounts  a ON a.id = r.account_id
+        WHERE  (r.last_reminder IS NULL OR $1 - r.last_reminder >= $2)
+    """
     async with (await get_pool()).acquire() as conn:
         rows = await conn.fetch(sql_due, now, timedelta(minutes=config.REMIND_AFTER_MIN))
 
     for row in rows:
-        status = await _last_message_status(row["avito_chat_id"])
+        status = await _last_message_status(row["avito_user_id"], row["avito_chat_id"])
         pool = await get_pool()
 
         if status == "buyer":
@@ -100,7 +104,11 @@ async def remind_loop() -> None:
 
 
 def install(app) -> None:
-    """Встраивает шедулер в жизненный цикл FastAPI (startup/shutdown)."""
+    """
+    Встраивает планировщик напоминаний в жизненный цикл FastAPI:
+    - при старте приложения запускает APScheduler;
+    - при остановке — корректно его останавливает.
+    """
     @app.on_event("startup")
     async def _start_scheduler():
         global _scheduler
