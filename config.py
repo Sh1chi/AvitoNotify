@@ -26,7 +26,7 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 TELEGRAM_ADMIN_USER_ID = int(os.getenv("TELEGRAM_ADMIN_USER_ID", "0") or "0")
 
 # ── Настройки напоминаний ──────────────────────────────────────────────────
-REMIND_AFTER_MIN = int(os.getenv("REMIND_AFTER_MIN", 1))  # интервал (в минутах)
+REMIND_AFTER_MIN = int(os.getenv("REMIND_AFTER_MIN", 15))  # интервал (в минутах)
 
 # ── Файл для хранения access/refresh токенов Avito ────────────────────────
 TOKENS_FILE = Path("tokens.json")

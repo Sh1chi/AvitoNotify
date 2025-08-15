@@ -69,7 +69,8 @@ async def remind_loop() -> None:
 
         if status == "buyer":
             minutes = int((now - row["first_ts"]).total_seconds() // 60)
-            await telegram.send_telegram(
+            await _notify_linked_chats(
+                row["account_id"],
                 f"⏰ Уже {minutes} мин без ответа в чате #{row['avito_chat_id']}"
             )
             async with pool.acquire() as conn:
@@ -81,9 +82,9 @@ async def remind_loop() -> None:
                 )
 
         elif status == "unknown":
-            await telegram.send_telegram(
-                f"⚠️ Не удалось получить данные по чату #{row['avito_chat_id']}. "
-                "Проверьте вручную."
+            await _notify_linked_chats(
+                row["account_id"],
+                f"⚠️ Не удалось получить данные по чату #{row['avito_chat_id']}. Проверьте вручную."
             )
             async with pool.acquire() as conn:
                 await conn.execute(
@@ -101,6 +102,21 @@ async def remind_loop() -> None:
                     row["account_id"],
                     row["avito_chat_id"],
                 )
+
+
+async def _notify_linked_chats(account_id: int, text: str) -> None:
+    """
+    Отправляет текст во все TG-чаты, привязанные к аккаунту (muted=FALSE).
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT tg_chat_id
+            FROM v_account_chat_targets
+            WHERE account_id = $1 AND muted = FALSE
+        """, account_id)
+    for r in rows:
+        await telegram.send_telegram_to(text, r["tg_chat_id"])
 
 
 def install(app) -> None:
