@@ -55,7 +55,7 @@ async def remind_loop() -> None:
     """
     now = datetime.now(timezone.utc)
     sql_due = """
-        SELECT r.account_id, a.avito_user_id, r.avito_chat_id, r.first_ts, r.last_reminder
+        SELECT r.account_id, a.avito_user_id, a.name, r.avito_chat_id, r.first_ts, r.last_reminder
         FROM   reminders r
         JOIN   accounts  a ON a.id = r.account_id
         WHERE  (r.last_reminder IS NULL OR $1 - r.last_reminder >= $2)
@@ -81,10 +81,12 @@ async def remind_loop() -> None:
                     row["avito_chat_id"],
                 )
 
+
         elif status == "unknown":
-            await _notify_linked_chats(
-                row["account_id"],
-                f"⚠️ Не удалось получить данные по чату #{row['avito_chat_id']}. Проверьте вручную."
+            account_label = row["name"] or row["avito_user_id"]
+            await telegram.send_telegram(
+                f"⚠️ Не удалось получить данные по чату #{row['avito_chat_id']} "
+                f"(аккаунт {account_label}, {row['avito_user_id']}). Проверьте вручную."
             )
             async with pool.acquire() as conn:
                 await conn.execute(
