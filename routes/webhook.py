@@ -2,7 +2,8 @@
 Приём Avito-webhook’ов и постановка напоминаний
 """
 import base64, hashlib, hmac, logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time as dtime
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request
 from dataclasses import dataclass
 
@@ -100,7 +101,6 @@ async def _remove_reminder(account_id: int, chat_id: str):
 
 
 async def _notify_all_chats(account_id: int, event_data: EventData):
-    """Шлёт сообщение во все связанные чаты."""
     msg = (
         "📩 *Новое сообщение Avito*\n"
         f"Аккаунт: {event_data.seller}\n"
@@ -108,14 +108,7 @@ async def _notify_all_chats(account_id: int, event_data: EventData):
         f"Текст: {event_data.text}\n"
         f"Время: {event_data.ts_str}"
     )
-    async with (await get_pool()).acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT tg_chat_id
-            FROM v_account_chat_targets
-            WHERE account_id=$1 AND muted=FALSE
-        """, account_id)
-    for r in rows:
-        await telegram.send_telegram_to(msg, r["tg_chat_id"])
+    await _broadcast_to_working_chats(account_id, msg)
 
 
 async def _add_reminder(account_id: int, chat_id: str):
@@ -126,3 +119,42 @@ async def _add_reminder(account_id: int, chat_id: str):
             VALUES ($1, $2, now())
             ON CONFLICT (account_id, avito_chat_id) DO NOTHING
         """, account_id, chat_id)
+
+
+def _in_window(local: dtime, start: dtime | None, end: dtime | None) -> bool:
+    """Проверяет попадание локального времени в окно [start, end) с поддержкой «через полночь».
+       Если окно не задано — считаем 24/7."""
+    if not start or not end:
+        return True
+    if start == end:
+        return True
+    if start < end:
+        return start <= local < end
+    return local >= start or local < end
+
+
+async def _broadcast_to_working_chats(account_id: int, text: str) -> None:
+    """Шлёт сообщение только тем чатам аккаунта, у кого сейчас рабочее время."""
+    now_utc = datetime.now(timezone.utc)
+
+    async with (await get_pool()).acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT ch.tg_chat_id, l.work_from, l.work_to, l.tz, l.muted
+            FROM notify.account_chat_links l
+            JOIN notify.telegram_chats ch ON ch.id = l.chat_id
+            WHERE l.account_id = $1 AND l.muted = FALSE
+            """,
+            account_id,
+        )
+
+    for r in rows:
+        tzname = r["tz"] or "UTC"
+        local_time = now_utc.astimezone(ZoneInfo(tzname)).time().replace(second=0, microsecond=0)
+        if _in_window(local_time, r["work_from"], r["work_to"]):
+            await telegram.send_telegram_to(text, r["tg_chat_id"])
+        else:
+            log.info(
+                "skip off-hours: chat=%s tz=%s now=%s window=%s–%s",
+                r["tg_chat_id"], tzname, local_time, r["work_from"], r["work_to"]
+            )
