@@ -101,14 +101,7 @@ async def _remove_reminder(account_id: int, chat_id: str):
 
 
 async def _notify_all_chats(account_id: int, event_data: EventData):
-    msg = (
-        "📩 *Новое сообщение Avito*\n"
-        f"Аккаунт: {event_data.seller}\n"
-        f"Чат #{event_data.chat_id}\n"
-        f"Текст: {event_data.text}\n"
-        f"Время: {event_data.ts_str}"
-    )
-    await _broadcast_to_working_chats(account_id, msg)
+    await _broadcast_to_working_chats(account_id, event_data)
 
 
 async def _add_reminder(account_id: int, chat_id: str):
@@ -133,16 +126,28 @@ def _in_window(local: dtime, start: dtime | None, end: dtime | None) -> bool:
     return local >= start or local < end
 
 
-async def _broadcast_to_working_chats(account_id: int, text: str) -> None:
+def _parse_utc(ts_str: str) -> datetime:
+    """Парсит строку вида 'YYYY-MM-DD HH:MM:SS UTC' в aware-datetime (UTC)."""
+    base = ts_str.replace(" UTC", "")
+    dt = datetime.strptime(base, "%Y-%m-%d %H:%M:%S")
+    return dt.replace(tzinfo=timezone.utc)
+
+
+async def _broadcast_to_working_chats(account_id: int, event_data: EventData) -> None:
     """Шлёт сообщение только тем чатам аккаунта, у кого сейчас рабочее время."""
     now_utc = datetime.now(timezone.utc)
+    msg_utc_dt = _parse_utc(event_data.ts_str)
 
     async with (await get_pool()).acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT ch.tg_chat_id, l.work_from, l.work_to, l.tz, l.muted
+            SELECT
+                ch.tg_chat_id,
+                l.work_from, l.work_to, l.tz, l.muted,
+                COALESCE(a.display_name, a.name, a.avito_user_id::text) AS account_label
             FROM notify.account_chat_links l
             JOIN notify.telegram_chats ch ON ch.id = l.chat_id
+            JOIN notify.accounts a       ON a.id = l.account_id
             WHERE l.account_id = $1 AND l.muted = FALSE
             """,
             account_id,
@@ -150,11 +155,23 @@ async def _broadcast_to_working_chats(account_id: int, text: str) -> None:
 
     for r in rows:
         tzname = r["tz"] or "UTC"
-        local_time = now_utc.astimezone(ZoneInfo(tzname)).time().replace(second=0, microsecond=0)
-        if _in_window(local_time, r["work_from"], r["work_to"]):
-            await telegram.send_telegram_to(text, r["tg_chat_id"])
-        else:
+
+        # проверка рабочих часов — по ТЕКУЩЕМУ локальному времени
+        local_now = now_utc.astimezone(ZoneInfo(tzname)).time().replace(second=0, microsecond=0)
+        if not _in_window(local_now, r["work_from"], r["work_to"]):
             log.info(
                 "skip off-hours: chat=%s tz=%s now=%s window=%s–%s",
-                r["tg_chat_id"], tzname, local_time, r["work_from"], r["work_to"]
+                r["tg_chat_id"], tzname, local_now, r["work_from"], r["work_to"]
             )
+            continue
+
+        local_msg_time = msg_utc_dt.astimezone(ZoneInfo(tzname)).strftime("%d.%m.%Y %H:%M")
+
+        text = (
+            "📩 *Новое сообщение Avito*\n"
+            f"Аккаунт: {r['account_label']}\n"
+            f"Чат #{event_data.chat_id}\n"
+            f"Текст: {event_data.text}\n"
+            f"Время: {local_msg_time}"
+        )
+        await telegram.send_telegram_to(text, r["tg_chat_id"])

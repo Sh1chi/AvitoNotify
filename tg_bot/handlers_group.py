@@ -61,7 +61,15 @@ async def cmd_link(message: Message, command: CommandObject):
             "Сначала подключите аккаунт через /avito_link в ЛС админа (пройдите OAuth)."
         )
     await ensure_link(acc_id, chat_db_id)
-    await message.answer(f"🔗 Группа привязана к {avito_user_id}. Уведомления включены.")
+
+    # показать кастомное имя (display_name) вместо id
+    from db import get_pool  # если ещё не импортирован вверху
+    async with (await get_pool()).acquire() as conn:
+        label = await conn.fetchval(
+            "SELECT COALESCE(display_name, name, avito_user_id::text) FROM notify.accounts WHERE id=$1",
+            acc_id,
+        )
+    await message.answer(f"🔗 Группа привязана к {label}. Уведомления включены.")
 
 
 @router.message(Command("unlink"))
