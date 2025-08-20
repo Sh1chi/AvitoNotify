@@ -44,21 +44,25 @@ async def avito_callback(code: str):
     # Получаем данные профиля, чтобы сохранить идентификатор и имя аккаунта
     me = await auth.fetch_self_info(tokens["access_token"])
     avito_user_id = int(me["id"])
-    name = me.get("name")
+    profile_name = me.get("name")
 
     # Создаём или обновляем запись аккаунта в БД
     async with (await get_pool()).acquire() as conn:
-        await conn.execute("""
-            INSERT INTO notify.accounts (avito_user_id, name)
-            VALUES ($1, $2)
+        await conn.execute(
+            """
+            INSERT INTO notify.accounts (avito_user_id, name, display_name)
+            VALUES ($1, $2, $2)
             ON CONFLICT (avito_user_id) DO UPDATE
-            SET name = COALESCE(EXCLUDED.name, notify.accounts.name);
-        """, avito_user_id, name)
+            SET name = EXCLUDED.name,
+                display_name = COALESCE(notify.accounts.display_name, EXCLUDED.name)
+            """,
+            avito_user_id, profile_name,
+        )
 
     # Сохраняем токены под конкретный avito_user_id
     await auth.store_tokens_for_user(avito_user_id, tokens)
 
-    return {"ok": True, "avito_user_id": avito_user_id, "name": name}
+    return {"ok": True, "avito_user_id": avito_user_id, "profile_name": profile_name}
 
 
 @router.get("/oauth/avito/link")

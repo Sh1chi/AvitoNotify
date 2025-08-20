@@ -104,6 +104,15 @@ async def ensure_link(account_id: int, chat_db_id: int) -> None:
             _BOT_DB_ID,
         )
 
+        await conn.execute(
+            """
+            UPDATE notify.accounts
+            SET display_name = COALESCE(display_name, name)
+            WHERE id = $1
+            """,
+            account_id,
+        )
+
 
 async def update_links_for_chat(chat_db_id: int, **kwargs) -> None:
     """

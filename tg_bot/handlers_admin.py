@@ -105,7 +105,7 @@ async def cmd_summary(message: Message):
 
     async with (await get_pool()).acquire() as conn:
         accounts = await conn.fetch(
-            "SELECT avito_user_id, COALESCE(name,'') AS name "
+            "SELECT avito_user_id, COALESCE(display_name, name, '') AS name "
             "FROM notify.accounts ORDER BY avito_user_id"
         )
         chats = await conn.fetch(
@@ -116,7 +116,7 @@ async def cmd_summary(message: Message):
             """
             SELECT
                 a.avito_user_id,
-                COALESCE(a.name,'') AS acc_name,
+                COALESCE(a.display_name, a.name, '') AS acc_name,
                 COALESCE(c.title,'') AS chat_title,
                 l.muted,
                 l.work_from,
@@ -178,3 +178,23 @@ async def cmd_summary(message: Message):
     text = "\n".join(parts).rstrip()
     for i in range(0, len(text), 3500):
         await message.answer(text[i:i + 3500])
+
+
+@router.message(Command("set_name"))
+async def cmd_set_name(message: Message):
+    if message.chat.type != "private" or not is_admin_message(message):
+        return
+    args = (message.text or "").split(maxsplit=2)
+    # ожидаем: /set_name <id> <имя>
+    if len(args) < 3 or not args[1].isdigit():
+        return await message.answer("Формат: /set_name <avito_user_id> <новое имя>")
+    avito_user_id = int(args[1])
+    new_name = args[2].strip()
+    if not new_name:
+        return await message.answer("Укажите новое имя.")
+    async with (await get_pool()).acquire() as conn:
+        updated = await conn.execute(
+            "UPDATE notify.accounts SET display_name=$2 WHERE avito_user_id=$1",
+            avito_user_id, new_name
+        )
+    await message.answer(f"✅ Имя для аккаунта {avito_user_id} обновлено: {new_name}")
