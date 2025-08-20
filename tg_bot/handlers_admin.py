@@ -95,3 +95,86 @@ async def cmd_delete_account(message: Message, command: CommandObject):
             log.warning("Ошибка очистки токенов пользователя %s: %s", avito_user_id, e)
 
     await message.answer("🗑 Аккаунт удалён, связи и напоминания очищены.")
+
+
+@router.message(Command("summary"))
+async def cmd_summary(message: Message):
+    # один главный админ в ЛС
+    if message.chat.type != "private" or not is_admin_message(message):
+        return
+
+    async with (await get_pool()).acquire() as conn:
+        accounts = await conn.fetch(
+            "SELECT avito_user_id, COALESCE(name,'') AS name "
+            "FROM notify.accounts ORDER BY avito_user_id"
+        )
+        chats = await conn.fetch(
+            "SELECT COALESCE(title,'') AS title, tg_chat_id "
+            "FROM notify.telegram_chats ORDER BY id"
+        )
+        links = await conn.fetch(
+            """
+            SELECT
+                a.avito_user_id,
+                COALESCE(a.name,'') AS acc_name,
+                COALESCE(c.title,'') AS chat_title,
+                l.muted,
+                l.work_from,
+                l.work_to,
+                l.tz,
+                l.daily_digest_time
+            FROM notify.account_chat_links l
+            JOIN notify.accounts a ON a.id = l.account_id
+            JOIN notify.telegram_chats c ON c.id = l.chat_id
+            ORDER BY a.avito_user_id, c.id
+            """
+        )
+
+    def fmt_hours(start, end, tz):
+        if start and end and start.hour == end.hour and start.minute == end.minute:
+            return f"24/7" + (f" ({tz})" if tz else "")
+        if start and end:
+            s = f"{start:%H:%M}–{end:%H:%M}"
+            return s + (f" ({tz})" if tz else "")
+        return "нет"
+
+    def fmt_time(val):
+        return f"{val:%H:%M}" if val else "нет"
+
+    parts = []
+    parts.append("📊 Сводка")
+
+    # Аккаунты — только user id и имя (если есть)
+    parts.append("\n\n👤 Аккаунты:")
+    if accounts:
+        for a in accounts:
+            parts.append(f"• {a['avito_user_id']}" + (f" — {a['name']}" if a['name'] else ""))
+    else:
+        parts.append("• нет")
+
+    # Чаты — без внутренних id и типов
+    parts.append("\n\n💬 Чаты:")
+    if chats:
+        for c in chats:
+            title = c["title"] or str(c["tg_chat_id"])
+            parts.append(f"• {title}")
+    else:
+        parts.append("• нет")
+
+    # Привязки — «человечески»
+    parts.append("\n\n🔗 Привязки:")
+    if links:
+        for l in links:
+            acc_label = (f"{l['acc_name']} " if l["acc_name"] else "") + f"({l['avito_user_id']})"
+            chat_title = l["chat_title"] or "Без названия"
+            parts.append(f"• Аккаунт {acc_label} подключён к чату «{chat_title}»")
+            parts.append(f"   ▸ Уведомления: {'включены' if not l['muted'] else 'выключены'}")
+            parts.append(f"   ▸ Рабочее время: {fmt_hours(l['work_from'], l['work_to'], l['tz'])}")
+            parts.append(f"   ▸ Утренний дайджест: {fmt_time(l['daily_digest_time'])}")
+            parts.append("")
+    else:
+        parts.append("• нет")
+
+    text = "\n".join(parts).rstrip()
+    for i in range(0, len(text), 3500):
+        await message.answer(text[i:i + 3500])
