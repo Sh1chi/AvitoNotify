@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 import reminders
 from routes import public, webhook
 from db import install_pool
-from admin_aiogram import install as install_aiogram
+from tg_bot import install as install_aiogram
 from reminders import install as install_reminders
 
 log = logging.getLogger("avito_bridge.main")
