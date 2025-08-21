@@ -29,7 +29,7 @@ async def is_chat_admin(message: Message) -> bool:
     return member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR)
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}), Command("start", "help", ignore_mention=True))
+@router.message(F.chat.type.in_({"group", "supergroup"}), Command( "help", ignore_mention=True))
 async def cmd_help_group(message: Message):
     """
     В группе: администратору — расширенный набор, остальным — публичная справка.
@@ -109,8 +109,6 @@ async def cmd_mute(message: Message, command: CommandObject):
     """
     if message.chat.type not in ("group", "supergroup"):
         return
-    if not await is_chat_admin(message):
-        return await message.answer("Только администратор чата может выполнять эту команду.")
     arg = (command.args or "").strip().lower()
     if arg not in ("on", "off"):
         return await message.answer("Формат: /mute on|off")

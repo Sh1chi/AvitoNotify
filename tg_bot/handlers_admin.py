@@ -19,8 +19,7 @@ log = logging.getLogger("AvitoNotify.aiogram.admin")
 router = Router()
 
 
-
-@router.message(F.chat.type == "private", Command("start", "help", ignore_mention=True))
+@router.message(F.chat.type == "private", Command( "help", ignore_mention=True))
 async def cmd_help_private(message: Message):
     """
     В ЛС: админу — полный справочник, остальным — публичная справка.

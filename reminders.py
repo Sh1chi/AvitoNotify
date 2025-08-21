@@ -213,6 +213,9 @@ async def _send_digest_for_link(link: dict, now_utc: datetime) -> None:
     """
     Формирует и отправляет дайджест по активным напоминаниям аккаунта в конкретный чат.
     """
+    if link.get("muted"):
+        return
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         rems = await conn.fetch("""
@@ -244,12 +247,14 @@ async def morning_digest_tick() -> None:
     now_utc = datetime.now(timezone.utc)
     async with (await get_pool()).acquire() as conn:
         links = await conn.fetch("""
-            SELECT l.account_id, ch.tg_chat_id, l.daily_digest_time, l.tz
+            SELECT l.account_id, ch.tg_chat_id, l.daily_digest_time, l.tz, l.muted
             FROM notify.account_chat_links l
             JOIN notify.telegram_chats ch ON ch.id = l.chat_id
             WHERE l.daily_digest_time IS NOT NULL
         """)
     for l in links:
+        if l["muted"]:
+            continue
         tz = ZoneInfo(l["tz"] or "UTC")
         local = now_utc.astimezone(tz).timetz().replace(second=0, microsecond=0)
         if local == l["daily_digest_time"]:
