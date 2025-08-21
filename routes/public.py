@@ -2,7 +2,7 @@
 OAuth-callback, health-check и подписка на веб-хуки.
 """
 import os, httpx, time
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from db import get_pool
@@ -20,6 +20,10 @@ async def subscribe_webhook(
     Подписывает текущий сервис на получение webhook'ов от Avito.
     URL берётся из переменной окружения WEBHOOK_PUBLIC_URL.
     """
+    webhook_url = os.getenv("WEBHOOK_PUBLIC_URL")
+    if not webhook_url:
+        raise HTTPException(400, "WEBHOOK_PUBLIC_URL is not set")
+
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.post(
             f"{config.AVITO_API_BASE}/messenger/v3/webhook",
@@ -32,7 +36,7 @@ async def subscribe_webhook(
 
 
 @router.get("/callback/avito", response_class=HTMLResponse)
-async def avito_callback(code: str):
+async def avito_callback(code: str, request: Request):
     """
     OAuth-редирект для мультиаккаунтов.
     Получает токены, профиль пользователя, сохраняет аккаунт в БД и токены в хранилище.
@@ -63,6 +67,26 @@ async def avito_callback(code: str):
 
         # Сохраняем токены под конкретный avito_user_id
         await auth.store_tokens_for_user(avito_user_id, tokens)
+
+
+        # ── авто-подписка на webhook (реальный Avito требует только url)
+        webhook_url = os.getenv("WEBHOOK_PUBLIC_URL") or (str(request.base_url).rstrip("/") + "/avito/webhook")
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                resp = await c.post(
+                    f"{config.AVITO_API_BASE}/messenger/v3/webhook",
+                    headers={"Authorization": f"Bearer {tokens['access_token']}"},
+                    json={"url": webhook_url},
+                )
+                # быстрый health-check: эндпоинт должен отвечать 200 за <=2s
+                try:
+                    await c.post(webhook_url, json={}, timeout=httpx.Timeout(2.0))
+                except Exception:
+                    pass  # необязателен для успешного OAuth
+            # при не-200 не ломаем OAuth-страницу, просто можно залогировать resp.status_code/resp.text
+        except Exception:
+            pass
+
 
         return HTMLResponse(content=f"""
                 <html>
