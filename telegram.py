@@ -14,7 +14,7 @@ async def send_telegram(text: str) -> None:
     """
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
     async with httpx.AsyncClient(timeout=10) as c:
-        r = await c.post(url, data={"chat_id": config.TELEGRAM_CHAT_ID, "text": text})
+        r = await c.post(url, data={"chat_id": config.TELEGRAM_ADMIN_USER_ID, "text": text})
 
     # Telegram вернул ошибку — пробрасываем как исключение
     if r.status_code != 200:

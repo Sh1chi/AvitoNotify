@@ -17,19 +17,16 @@ REDIRECT_URI     = os.getenv("AVITO_REDIRECT_URI")
 # ── URL‑ы Avito API с дефолтами ────────────────────────────────────────────
 TOKEN_URL        = os.getenv("AVITO_TOKEN_URL",  "https://api.avito.ru/token")
 AVITO_API_BASE   = os.getenv("AVITO_API_BASE",  "https://api.avito.ru")
-AVITO_HOOK_SECRET = os.getenv("AVITO_HOOK_SECRET", "changeme")
-AVITO_USER_ID = int(os.getenv("AVITO_USER_ID", 0))
 
 # ── Telegram bot credentials ───────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 TELEGRAM_ADMIN_USER_ID = int(os.getenv("TELEGRAM_ADMIN_USER_ID", "0") or "0")
 
 # ── Настройки напоминаний ──────────────────────────────────────────────────
-REMIND_AFTER_MIN = int(os.getenv("REMIND_AFTER_MIN", 1))  # интервал (в минутах)
+REMIND_AFTER_MIN = int(os.getenv("REMIND_AFTER_MIN", 15))  # интервал (в минутах)
 
 # ── Файл для хранения access/refresh токенов Avito ────────────────────────
-TOKENS_FILE = Path("tokens.json")
+TOKENS_FILE = Path(os.getenv("TOKENS_PATH", "tokens.json"))
 
 # ── Database ──────────────────────────────────────────────────────────────
 NOTIFY_DB_URL = os.getenv(

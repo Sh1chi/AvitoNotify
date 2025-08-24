@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.log
+.git/
+.gitignore
+.env
+.env.*
+.venv/
+venv/
+tokens.json
+tokens.bak
+runtime/
