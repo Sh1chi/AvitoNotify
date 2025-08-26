@@ -51,6 +51,11 @@ async def avito_webhook(request: Request):
     """
     Обрабатывает входящий webhook от Avito.
     """
+    data = await request.json()
+    # Ping/self-check от avito_callback
+    if data.get("ping") or data == {}:
+        return {"ok": True}
+
     raw = await request.body()
     _check_signature(raw, request.headers.get("X-Hook-Signature", ""))
 

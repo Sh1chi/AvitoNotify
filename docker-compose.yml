@@ -29,9 +29,7 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      # если используешь sync-драйвер:
-      NOTIFY_DB_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?options=-csearch_path%3Dnotify
-      # если async — поменяй на postgresql+asyncpg:// и поставь нужные пакеты
+      NOTIFY_DB_URL: ${NOTIFY_DB_URL}
       TOKENS_PATH: /app/runtime/tokens.json
       PORT: ${APP_PORT:-8000}
     volumes:

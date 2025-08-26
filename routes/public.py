@@ -80,7 +80,7 @@ async def avito_callback(code: str, request: Request):
                 )
                 # быстрый health-check: эндпоинт должен отвечать 200 за <=2s
                 try:
-                    await c.post(webhook_url, json={}, timeout=httpx.Timeout(2.0))
+                    await c.post(webhook_url, json={"ping": True}, timeout=httpx.Timeout(2.0))
                 except Exception:
                     pass  # необязателен для успешного OAuth
             # при не-200 не ломаем OAuth-страницу, просто можно залогировать resp.status_code/resp.text
