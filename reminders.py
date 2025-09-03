@@ -64,7 +64,11 @@ async def remind_loop() -> None:
             SELECT r.account_id, a.avito_user_id, a.name, r.avito_chat_id, r.avito_chat_title, r.first_ts, r.last_reminder
             FROM   reminders r
             JOIN   accounts  a ON a.id = r.account_id
-            WHERE  (r.last_reminder IS NULL OR $1 - r.last_reminder >= $2)
+            WHERE (
+                (r.last_reminder IS NULL AND $1 - r.first_ts     >= $2)
+                OR
+                (r.last_reminder IS NOT NULL AND $1 - r.last_reminder >= $2)
+            )
         """
         async with (await get_pool()).acquire() as conn:
             rows = await conn.fetch(sql_due, now, timedelta(minutes=config.REMIND_AFTER_MIN))
@@ -148,7 +152,7 @@ def install(app) -> None:
         # Цикл напоминаний
         _scheduler.add_job(
             remind_loop,
-            trigger=IntervalTrigger(minutes=config.REMIND_AFTER_MIN),
+            trigger=IntervalTrigger(minutes=1),
             id="remind_loop",            # фиксируем ID
             replace_existing=True,       # не плодить дубли
             coalesce=True,               # сжать пропуски
