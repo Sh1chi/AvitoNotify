@@ -197,3 +197,42 @@ async def cmd_set_name(message: Message):
             avito_user_id, new_name
         )
     await message.answer(f"✅ Имя для аккаунта {avito_user_id} обновлено: {new_name}")
+
+
+@router.message(Command("clear_reminders"))
+async def cmd_clear_reminders(message: Message):
+    """
+    Удалить все напоминания для заданного avito_user_id.
+    Доступно только админу в ЛС: /clear_reminders <avito_user_id>
+    """
+    if message.chat.type != "private":
+        return
+    if not is_admin_message(message):
+        return
+
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip().isdigit():
+        return await message.answer("Формат: /clear_reminders <avito_user_id>")
+
+    avito_user_id = int(args[1].strip())
+    async with (await get_pool()).acquire() as conn:
+        status = await conn.execute(
+            """
+            DELETE FROM notify.reminders r
+            USING notify.accounts a
+            WHERE a.id = r.account_id
+              AND a.avito_user_id = $1
+            """,
+            avito_user_id,
+        )
+
+    deleted = 0
+    if isinstance(status, str) and status.startswith("DELETE"):
+        try:
+            deleted = int(status.split()[-1])
+        except Exception:
+            deleted = 0
+
+    if deleted == 0:
+        return await message.answer(f"Напоминаний для аккаунта {avito_user_id} не найдено.")
+    return await message.answer(f"🧹 Удалено напоминаний: {deleted} (аккаунт {avito_user_id}).")
