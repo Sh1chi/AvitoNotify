@@ -2,7 +2,7 @@
 Приём Avito-webhook’ов и постановка напоминаний
 """
 import base64, hashlib, hmac, logging, auth, httpx
-from datetime import datetime, timezone, time as dtime
+from datetime import datetime, timezone, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request
 from dataclasses import dataclass
@@ -190,6 +190,19 @@ async def _broadcast_to_working_chats(account_id: int, event_data: EventData) ->
             f"Текст: {event_data.text}\n"
             f"Время: {local_msg_time}"
         )
+
+        allowed = await allow_and_touch_throttle(
+            account_id=account_id,
+            avito_chat_id=event_data.chat_id,
+            tg_chat_id=r["tg_chat_id"],
+        )
+        if not allowed:
+            log.debug(
+                "throttle: skip notify acc=%s chat=%s tg=%s",
+                account_id, event_data.chat_id, r["tg_chat_id"]
+            )
+            continue
+
         await telegram.send_telegram_to(text, r["tg_chat_id"])
 
 
@@ -217,3 +230,28 @@ async def _fetch_chat_title(avito_user_id: int, chat_id: str) -> str:
     except Exception as e:
         log.warning("chat info error %s/%s: %s", avito_user_id, chat_id, e)
         return f"#{chat_id}"
+
+
+async def allow_and_touch_throttle(account_id: int, avito_chat_id: str, tg_chat_id: int) -> bool:
+    """
+    Атомарно решает, можно ли сейчас отправить уведомление в данный tg_chat_id
+    по данному avito_chat_id и account_id. Если можно — обновляет last_sent_ts.
+    Возвращает True, если отправка разрешена (и мы отметили отправку), иначе False.
+    """
+    minutes = max(1, config.MESSAGE_THROTTLE_MIN)
+    interval = timedelta(minutes=minutes)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchval(
+            """
+            INSERT INTO notify.msg_throttle (account_id, avito_chat_id, tg_chat_id, last_sent_ts)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (account_id, avito_chat_id, tg_chat_id)
+            DO UPDATE SET last_sent_ts = EXCLUDED.last_sent_ts
+            WHERE EXCLUDED.last_sent_ts - notify.msg_throttle.last_sent_ts >= $4::interval
+            RETURNING 1
+            """,
+            account_id, str(avito_chat_id), int(tg_chat_id), interval
+        )
+        return bool(row)
