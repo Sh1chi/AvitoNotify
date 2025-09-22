@@ -71,12 +71,21 @@ async def cleanup_all_chats() -> int:
                 ids,
             )
 
-        # 🔻 ХАРД-УДАЛЕНИЕ старых «мягко удалённых» (ретенция)
+        # ХАРД-УДАЛЕНИЕ старых «мягко удалённых» (ретенция)
         await conn.execute("""
                 DELETE FROM notify.sent_messages
                 WHERE deleted_ts IS NOT NULL
                   AND deleted_ts < now() - make_interval(days => $1)
             """, config.SENT_MESSAGES_RETENTION_DAYS)
+
+        # чистим «мертвые» троттлы (давно не было отправок)
+        await conn.execute(
+            """
+            DELETE FROM notify.msg_throttle
+            WHERE last_sent_ts < now() - make_interval(days => $1)
+            """,
+            config.THROTTLE_RETENTION_DAYS,
+        )
 
         return len(ids)
 

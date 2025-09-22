@@ -27,6 +27,7 @@ REMIND_AFTER_MIN = int(os.getenv("REMIND_AFTER_MIN", "15"))
 MESSAGE_THROTTLE_MIN = int(os.getenv("MESSAGE_THROTTLE_MIN", "15"))
 CLEANUP_INTERVAL_DAYS = int(os.getenv("CLEANUP_INTERVAL_DAYS", "2"))
 SENT_MESSAGES_RETENTION_DAYS = int(os.getenv("SENT_MESSAGES_RETENTION_DAYS", "30"))
+THROTTLE_RETENTION_DAYS = int(os.getenv("THROTTLE_RETENTION_DAYS", "60"))
 
 # ── Файл для хранения access/refresh токенов Avito ────────────────────────
 TOKENS_FILE = Path(os.getenv("TOKENS_PATH", "tokens.json"))
