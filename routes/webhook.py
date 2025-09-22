@@ -192,10 +192,12 @@ async def _broadcast_to_working_chats(account_id: int, event_data: EventData) ->
             f"Время: {local_msg_time}"
         )
 
-        allowed = await allow_and_touch_throttle(
+        # Разрешаем отправку и сразу получаем id «прошлого» уведомления (если было)
+        allowed, prev_msg_id = await _allow_and_touch_throttle_get_prev(
             account_id=account_id,
             avito_chat_id=event_data.chat_id,
             tg_chat_id=r["tg_chat_id"],
+            interval_min=config.MESSAGE_THROTTLE_MIN,
         )
         if not allowed:
             log.debug(
@@ -204,7 +206,17 @@ async def _broadcast_to_working_chats(account_id: int, event_data: EventData) ->
             )
             continue
 
-        await notifications.send_and_log(text, r["tg_chat_id"])
+        # Отправляем новое уведомление и логируем его в sent_messages
+        new_msg_id = await notifications.send_and_log(text, r["tg_chat_id"])
+        if new_msg_id:
+            # Запоминаем его в msg_throttle как «последний»
+            await _set_throttle_last_message_id(
+                account_id, event_data.chat_id, r["tg_chat_id"], new_msg_id
+            )
+
+            # Если было прошлое уведомление по этому же диалогу в этом же чате — удалим его
+            if prev_msg_id:
+                await notifications.delete_and_mark(r["tg_chat_id"], prev_msg_id)
 
 
 async def _fetch_chat_title(avito_user_id: int, chat_id: str) -> str:
@@ -256,3 +268,57 @@ async def allow_and_touch_throttle(account_id: int, avito_chat_id: str, tg_chat_
             account_id, str(avito_chat_id), int(tg_chat_id), interval
         )
         return bool(row)
+
+
+async def _allow_and_touch_throttle_get_prev(
+    account_id: int,
+    avito_chat_id: str,
+    tg_chat_id: int,
+    interval_min: int,
+) -> tuple[bool, int | None]:
+    """
+    Атомарно пытается обновить last_sent_ts (как раньше), НО возвращает
+    прошлый last_tg_message_id, если отправка разрешена.
+    Если не прошло окно — вернёт (False, None).
+    """
+    minutes = max(1, int(interval_min))
+    interval_td = timedelta(minutes=minutes)  # ← timedelta вместо строки
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO notify.msg_throttle (account_id, avito_chat_id, tg_chat_id, last_sent_ts)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (account_id, avito_chat_id, tg_chat_id)
+            DO UPDATE SET last_sent_ts = EXCLUDED.last_sent_ts
+            WHERE EXCLUDED.last_sent_ts - notify.msg_throttle.last_sent_ts >= $4::interval
+            RETURNING last_tg_message_id
+            """,
+            int(account_id), str(avito_chat_id), int(tg_chat_id), interval_td  # ← передаём timedelta
+        )
+        if not row:
+            return False, None
+        return True, (row["last_tg_message_id"] if row["last_tg_message_id"] is not None else None)
+
+
+async def _set_throttle_last_message_id(
+    account_id: int,
+    avito_chat_id: str,
+    tg_chat_id: int,
+    last_tg_message_id: int,
+) -> None:
+    """
+    После успешной отправки нового уведомления фиксируем его message_id
+    в троттлинге — он станет «тем самым прошлым» для следующей замены.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE notify.msg_throttle
+               SET last_tg_message_id = $4
+             WHERE account_id = $1 AND avito_chat_id = $2 AND tg_chat_id = $3
+            """,
+            int(account_id), str(avito_chat_id), int(tg_chat_id), int(last_tg_message_id)
+        )

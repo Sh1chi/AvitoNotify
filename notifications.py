@@ -7,18 +7,15 @@ import config
 async def send_and_log(text: str, tg_chat_id: int) -> Optional[int]:
     """
     Отправляет сообщение в Telegram и сохраняет (tg_chat_id, message_id)
-    для последующей очистки.
+    для последующей очистки. Возвращает message_id (или None при ошибке).
     """
-    msg = await telegram.send_telegram_to(text, tg_chat_id)
-
-    # msg — это dict из Telegram "result"
+    res = await telegram.send_telegram_to(text, tg_chat_id)
+    # res — это dict из Telegram "result"
     message_id = None
-    if isinstance(msg, dict):
-        message_id = msg.get("message_id")
+    if isinstance(res, dict):
+        message_id = res.get("message_id")
     else:
-        # на всякий случай поддержим старый путь
-        message_id = getattr(msg, "message_id", None)
-
+        message_id = getattr(res, "message_id", None)
     if message_id is None:
         return None
 
@@ -28,6 +25,28 @@ async def send_and_log(text: str, tg_chat_id: int) -> Optional[int]:
             int(tg_chat_id), int(message_id),
         )
     return int(message_id)
+
+
+async def delete_and_mark(tg_chat_id: int, tg_message_id: int) -> None:
+    """
+    Удаляет сообщение в Telegram и помечает запись как удалённую в БД.
+    Если сообщение уже удалено — тихо игнорируем.
+    """
+    try:
+        await telegram.delete_message(int(tg_chat_id), int(tg_message_id))
+    except Exception:
+        pass
+
+    async with (await get_pool()).acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE notify.sent_messages
+               SET deleted_ts = now()
+             WHERE tg_chat_id = $1 AND tg_message_id = $2
+               AND deleted_ts IS NULL
+            """,
+            int(tg_chat_id), int(tg_message_id),
+        )
 
 async def cleanup_all_chats() -> int:
     """
