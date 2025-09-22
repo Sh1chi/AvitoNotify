@@ -6,6 +6,9 @@ import config
 
 log = logging.getLogger("AvitoNotify.telegram")
 
+def _one_line(s: str, limit: int = 160) -> str:
+    s = " ".join((s or "").split())  # склеить строки и схлопнуть пробелы
+    return (s[:limit] + "…") if len(s) > limit else s
 
 async def send_telegram(text: str) -> None:
     """
@@ -23,7 +26,7 @@ async def send_telegram(text: str) -> None:
     if r.status_code != 200:
         log.error("Telegram error %s: %s", r.status_code, r.text)
         raise RuntimeError(f"Telegram API {r.status_code}: {r.text}")
-    log.info("→ Telegram OK: %s", text[:80])
+    log.info("→ Telegram OK to admin: %s", _one_line(text))
 
 
 async def send_telegram_to(text: str, chat_id: int, bot_token: str | None = None):
@@ -50,7 +53,7 @@ async def send_telegram_to(text: str, chat_id: int, bot_token: str | None = None
 
     data = r.json()
     res = data.get("result")
-    log.info("→ Telegram OK to %s: %s", chat_id, text[:80])
+    log.info("→ Telegram OK to admin: %s", _one_line(text))
     return res  # у res есть поле "message_id"
 
 

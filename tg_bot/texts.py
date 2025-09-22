@@ -16,7 +16,7 @@ HELP_TEXT_ADMIN_PRIVATE = (
     "• /link <avito_user_id> — привязать аккаунт к этому чату\n"
     "• /unlink <avito_user_id> — отвязать аккаунт от этого чата\n"
     "• /mute on|off — включить/выключить уведомления\n"
-    "• /hours HH:MM-HH:MM [Europe/Moscow] — рабочие часы\n"
+    "• /hours HH:MM-HH:MM Asia/Novosibirsk — рабочие часы\n"
     "• /digest HH:MM|off — ежедневный дайджест\n"
 )
 
