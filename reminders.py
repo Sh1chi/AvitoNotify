@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 import telegram, config
+import notifications
 from auth import get_valid_access_token
 from db import get_pool
 
@@ -132,7 +133,7 @@ async def _notify_linked_chats(account_id: int, text: str) -> None:
             WHERE account_id = $1 AND muted = FALSE
         """, account_id)
     for r in rows:
-        await telegram.send_telegram_to(text, r["tg_chat_id"])
+        await notifications.send_and_log(text, r["tg_chat_id"])
 
 
 def install(app) -> None:
@@ -165,6 +166,15 @@ def install(app) -> None:
             morning_digest_tick,
             trigger=IntervalTrigger(minutes=1),
             id="morning_digest",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
+
+        _scheduler.add_job(
+            notifications.cleanup_all_chats,
+            trigger=IntervalTrigger(days=config.CLEANUP_INTERVAL_DAYS),
+            id="cleanup_all_chats",
             replace_existing=True,
             coalesce=True,
             max_instances=1,
@@ -217,7 +227,7 @@ async def _notify_linked_chats_in_hours(account_id: int, text: str, now_utc: dat
         if link["muted"]:
             continue
         if _within_hours(now_utc, link["work_from"], link["work_to"], link["tz"]):
-            await telegram.send_telegram_to(text, link["tg_chat_id"])
+            await notifications.send_and_log(text, link["tg_chat_id"])
             sent += 1
     return sent
 
@@ -250,7 +260,7 @@ async def _send_digest_for_link(link: dict, now_utc: datetime) -> None:
     for r in rems:
         minutes = int((now_utc - r["first_ts"]).total_seconds() // 60)
         lines.append(f"• Чат #{r['avito_chat_id']}: {minutes} мин без ответа")
-    await telegram.send_telegram_to("\n".join(lines), link["tg_chat_id"])
+    await notifications.send_and_log("\n".join(lines), link["tg_chat_id"])
 
 
 async def morning_digest_tick() -> None:

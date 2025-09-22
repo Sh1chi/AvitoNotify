@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from dataclasses import dataclass
 
 import config, telegram
+import notifications
 from db import get_pool
 
 router = APIRouter()
@@ -203,7 +204,7 @@ async def _broadcast_to_working_chats(account_id: int, event_data: EventData) ->
             )
             continue
 
-        await telegram.send_telegram_to(text, r["tg_chat_id"])
+        await notifications.send_and_log(text, r["tg_chat_id"])
 
 
 async def _fetch_chat_title(avito_user_id: int, chat_id: str) -> str:

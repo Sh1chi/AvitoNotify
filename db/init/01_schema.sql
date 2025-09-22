@@ -114,3 +114,35 @@ FROM notify.account_chat_links l
 JOIN notify.accounts a         ON a.id = l.account_id
 JOIN notify.telegram_chats tc  ON tc.id = l.chat_id
 LEFT JOIN notify.telegram_bots tb ON tb.id = l.bot_id;
+
+/* ====================== 6. СЕРВИСНЫЕ ТАБЛИЦЫ ================== */
+/* 6.1 Отправленные ботом сообщения (для последующей «генуборки») */
+CREATE TABLE IF NOT EXISTS notify.sent_messages (
+    id            BIGSERIAL PRIMARY KEY,
+    tg_chat_id    BIGINT      NOT NULL,
+    tg_message_id BIGINT      NOT NULL,
+    created_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_ts    TIMESTAMPTZ
+);
+
+/* Быстрые выборки «не удалённых» и по чату */
+CREATE INDEX IF NOT EXISTS sent_messages_active_idx
+ON notify.sent_messages (tg_chat_id)
+WHERE deleted_ts IS NULL;
+
+/* 6.2 Дроссель уведомлений «не чаще, чем раз в N минут» */
+CREATE TABLE IF NOT EXISTS notify.msg_throttle (
+    account_id     INT        NOT NULL REFERENCES notify.accounts(id) ON DELETE CASCADE,
+    avito_chat_id  TEXT       NOT NULL,     -- ID диалога в Avito
+    tg_chat_id     BIGINT     NOT NULL,     -- ID Telegram-чата получателя
+    last_sent_ts   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (account_id, avito_chat_id, tg_chat_id)
+);
+
+/* Ускорим проверку окна */
+CREATE INDEX IF NOT EXISTS idx_msg_throttle_last_ts
+ON notify.msg_throttle (last_sent_ts);
+
+CREATE INDEX IF NOT EXISTS sent_messages_deleted_idx
+ON notify.sent_messages (deleted_ts)
+WHERE deleted_ts IS NOT NULL;

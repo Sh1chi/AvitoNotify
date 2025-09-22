@@ -236,3 +236,12 @@ async def cmd_clear_reminders(message: Message):
     if deleted == 0:
         return await message.answer(f"Напоминаний для аккаунта {avito_user_id} не найдено.")
     return await message.answer(f"🧹 Удалено напоминаний: {deleted} (аккаунт {avito_user_id}).")
+
+
+@router.message(Command("cleanup_now"))
+async def cmd_cleanup_now(message: Message):
+    if not is_admin_message(message):
+        return
+    from notifications import cleanup_all_chats
+    n = await cleanup_all_chats()
+    await message.answer(f"🧹 Удалено сообщений: {n}")
